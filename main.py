@@ -1,50 +1,35 @@
-import fitz
-
-from src.chunker import create_chunks
-from src.embeddings import create_embeddings
-from src.vector_store import create_vector_store, search_vector_store
-
-pdf = fitz.open("data/notes.pdf")
-
-print(f"Number of pages: {len(pdf)}")
-
-full_text = ""
-
-for page in pdf:
-    text = page.get_text()
-    full_text += text
+from src.rag import build_rag, ask_question
 
 
-created_chunks = create_chunks(
-    full_text,
-    chunk_size=500,
-    overlap=100
-)
+# Build RAG index once
+chunks, index = build_rag("data/notes.pdf")
 
-print("Total chunks:", len(created_chunks))
+print("RAG system ready!")
+print("Total chunks:", len(chunks))
+print("Total vectors:", index.ntotal)
 
 
-embeddings = create_embeddings(created_chunks)
+# Keep asking questions
+while True:
 
-print("Embedding shape:", embeddings.shape)
+    question = input("\nAsk a question (or type 'exit'): ")
 
-index =  create_vector_store(embeddings)
+    if question.lower() == "exit":
+        break
 
-print("Vector store created with", index.ntotal, "vectors.")
+    answer, retrieved_chunks, scores = ask_question(
+        question,
+        chunks,
+        index
+    )
 
-query = "What is interrupt?"
+    print("\nFinal Answer:")
+    print(answer)
 
-query_embedding = create_embeddings([query])
+    print("\nSources:")
 
-distances, indices = search_vector_store(index, query_embedding, k=3)
-
-print("\nSearch results:")
-
-for i in range(3):
-    chunk_index = indices[0][i]
-    print(f"\nResult {i + 1}")
-    print("Chunk index:", chunk_index)
-    print("Distance:", distances[0][i])
-    print("Text:")
-    print(created_chunks[chunk_index])
-    
+    for chunk in retrieved_chunks:
+        print(
+            f"- Page {chunk['page']} "
+            f"(Chunk {chunk['chunk_id']})"
+        )
