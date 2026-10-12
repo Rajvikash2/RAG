@@ -36,15 +36,14 @@ if uploaded_file:
 
         with st.spinner("Processing PDF..."):
 
-            chunks, index = build_rag(pdf_bytes)
+            collection = build_rag(pdf_bytes)
 
-        st.session_state.chunks = chunks
-        st.session_state.index = index
+        st.session_state.collection = collection
         st.session_state.file_name = current_file
 
         st.success(
             f"PDF processed successfully! "
-            f"Created {len(chunks)} chunks."
+            f"Created {collection.count()} chunks in ChromaDB."
         )
 
     else:
@@ -58,7 +57,7 @@ if uploaded_file:
 # Question
 # -------------------------
 
-if "index" in st.session_state:
+if "collection" in st.session_state:
 
     st.divider()
 
@@ -72,8 +71,8 @@ if "index" in st.session_state:
 
             answer, retrieved_chunks, scores = ask_question(
                 question,
-                st.session_state.chunks,
-                st.session_state.index
+                st.session_state.collection
+                
             )
 
         st.subheader("Answer")

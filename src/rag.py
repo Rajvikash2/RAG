@@ -1,71 +1,83 @@
+
+import hashlib
+from pathlib import Path
+
 from src.pdf_loader import extract_pages
 from src.chunker import create_chunks
 from src.embeddings import create_embeddings
-from src.vector_store import create_vector_store, search_vector_store
+from src.vector_store import get_collection, store_chunks, search_chunks
 from src.llm import generate_answer
 
 
 def build_rag(pdf_source):
-    """
-    Process a PDF and build the vector store.
-    """
+    # Get PDF bytes to identify the document
+    if isinstance(pdf_source, str):
+        pdf_bytes = Path(pdf_source).read_bytes()
+        loader_source = pdf_source
+    else:
+        pdf_bytes = pdf_source
+        loader_source = pdf_source
 
-    pages = extract_pages(pdf_source)
+    document_hash = hashlib.sha256(pdf_bytes).hexdigest()[:16]
+    collection_name = f"pdf_{document_hash}"
 
-    chunks = create_chunks(
-        pages,
-        chunk_size=500,
-        overlap=100
-    )
+    # Reuse the collection if this PDF was already indexed
+    collection = get_collection(collection_name)
 
-    chunk_texts = [
-        chunk["text"]
-        for chunk in chunks
-    ]
+    if collection.count() == 0:
+        pages = extract_pages(loader_source)
 
-    embeddings = create_embeddings(chunk_texts)
+        chunks = create_chunks(
+            pages,
+            chunk_size=500,
+            overlap=100
+        )
 
-    index = create_vector_store(embeddings)
+        if not chunks:
+            raise ValueError("No text could be extracted from this PDF.")
 
-    return chunks, index
+        chunk_texts = [
+            chunk["text"]
+            for chunk in chunks
+        ]
+
+        embeddings = create_embeddings(chunk_texts)
+
+        store_chunks(
+            collection,
+            chunks,
+            embeddings
+        )
+
+    return collection
 
 
-def ask_question(question, chunks, index, top_k=3):
-    """
-    Search the vector store and generate an answer.
-    """
-
-    # 1. Create embedding for the question
+def ask_question(question, collection, top_k=3):
     query_embedding = create_embeddings([question])
 
-    # 2. Search FAISS
-    scores, indices = search_vector_store(
-        index,
+    results = search_chunks(
+        collection,
         query_embedding,
         top_k=top_k
     )
 
-    # 3. Get the actual chunks
-    retrieved_chunks = []
+    documents = results["documents"][0]
+    metadatas = results["metadatas"][0]
 
-    for i in range(top_k):
+    retrieved_chunks = [
+        {
+            "text": document,
+            "page": metadata["page"],
+            "chunk_id": metadata["chunk_id"]
+        }
+        for document, metadata in zip(documents, metadatas)
+    ]
 
-        chunk_index = indices[0][i]
-
-        chunk = chunks[chunk_index]
-
-        retrieved_chunks.append(chunk)
-
-    # 4. Create context for Gemini
     context = "\n\n".join(
         chunk["text"]
         for chunk in retrieved_chunks
     )
 
-    # 5. Generate answer
-    answer = generate_answer(
-        context,
-        question
-    )
+    answer = generate_answer(context, question)
 
-    return answer, retrieved_chunks, scores
+    return answer, retrieved_chunks, results["distances"]
